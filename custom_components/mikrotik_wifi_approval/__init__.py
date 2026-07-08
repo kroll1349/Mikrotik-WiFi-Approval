@@ -1,10 +1,11 @@
 """The MikroTik WiFi Approval integration."""
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import MikrotikApiClient
 from .const import (
@@ -26,12 +27,15 @@ async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
 ) -> bool:
-    """Set up MikroTik WiFi Approval from a config entry."""
+    """Set up a config entry."""
+
+    session = async_get_clientsession(hass)
 
     api = MikrotikApiClient(
         host=entry.data[CONF_HOST],
         username=entry.data[CONF_USERNAME],
         password=entry.data[CONF_PASSWORD],
+        session=session,
     )
 
     hass.data.setdefault(DOMAIN, {})
