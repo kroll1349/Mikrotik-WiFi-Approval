@@ -1,0 +1,18 @@
+{
+  "domain": "mikrotik_wifi_approval",
+  "name": "MikroTik WiFi Approval",
+  "codeowners": [
+    "@kroll1349"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/kroll1349/Mikrotik-WiFi-Approval",
+  "integration_type": "hube",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/kroll1349/Mikrotik-WiFi-Approval/issues",
+  "loggers": [
+    "custom_components.mikrotik_wifi_approval"
+  
+  ],
+  "version": "0.0.1"
+}
