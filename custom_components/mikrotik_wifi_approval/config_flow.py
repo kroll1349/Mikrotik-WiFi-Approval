@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import voluptuous as vol
@@ -11,11 +10,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import (
-    MikrotikApiClient,
-    MikrotikAuthenticationError,
-    MikrotikConnectionError,
-)
+from .api import MikrotikApiClient
 from .const import (
     CONF_HOST,
     CONF_PASSWORD,
@@ -23,8 +18,10 @@ from .const import (
     DEFAULT_NAME,
     DOMAIN,
 )
-
-_LOGGER = logging.getLogger(__name__)
+from .exceptions import (
+    CannotConnect,
+    InvalidAuth,
+)
 
 
 class MikrotikWifiApprovalConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -57,24 +54,18 @@ class MikrotikWifiApprovalConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 identity = await api.identity()
 
-                _LOGGER.info(
-                    "Connected to MikroTik: %s",
-                    identity.get("name"),
-                )
-
                 return self.async_create_entry(
                     title=identity.get("name", DEFAULT_NAME),
                     data=user_input,
                 )
 
-            except MikrotikAuthenticationError:
+            except InvalidAuth:
                 errors["base"] = "invalid_auth"
 
-            except MikrotikConnectionError:
+            except CannotConnect:
                 errors["base"] = "cannot_connect"
 
             except Exception:
-                _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
 
         return self.async_show_form(
@@ -98,12 +89,13 @@ class MikrotikWifiApprovalConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class MikrotikWifiApprovalOptionsFlow(config_entries.OptionsFlow):
-    """Handle options."""
+    """Options flow."""
 
     def __init__(self, config_entry):
         self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
+        """Manage options."""
 
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
