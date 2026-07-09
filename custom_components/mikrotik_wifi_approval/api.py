@@ -271,7 +271,14 @@ class MikrotikApiClient:
         await self._create_catchall()
 
     async def _create_catchall(self) -> None:
-        """Create the tagged catch-all reject rule."""
+        """Create the tagged catch-all reject rule.
+
+        Note: on some RouterOS/wifi-qcom firmware versions (observed on
+        AX2/AX3 hardware), an access-list rule with NO matching criteria
+        at all is silently ignored by the firmware, even though the
+        official docs say an empty rule should match everything. Adding
+        an explicit (but always-true) signal-range works around this.
+        """
 
         await self._request(
             "PUT",
@@ -279,23 +286,33 @@ class MikrotikApiClient:
             {
                 "action": "reject",
                 "comment": CATCHALL_COMMENT,
+                "signal-range": "-120..120",
             },
         )
 
     async def enable_strict_mode(self) -> None:
-        """Approve every currently connected device, then enable the
+        """Approve every currently connected device, then (re)create the
         catch-all reject rule.
 
         This is the safe order: run this once and every device that is
         already trusted on your network keeps working, while any device
         that connects afterwards (or reconnects after being removed)
-        must be explicitly approved.
+        must be explicitly approved. Always recreates the catch-all rule
+        (even if one already exists), so re-running this after an update
+        picks up any fixes to how that rule is built.
         """
 
         await self.approve_all_current()
 
-        if await self._find_catchall() is None:
-            await self._create_catchall()
+        existing = await self._find_catchall()
+
+        if existing is not None:
+            await self._request(
+                "DELETE",
+                f"/interface/wifi/access-list/{existing['.id']}",
+            )
+
+        await self._create_catchall()
 
     async def approve_all_current(self) -> int:
         """Add an explicit 'accept' rule for every currently connected
