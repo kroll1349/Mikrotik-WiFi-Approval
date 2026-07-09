@@ -175,6 +175,54 @@ class MikrotikApiClient:
             "/interface/wifi/registration-table",
         )
 
+    async def find_registration_by_mac(
+        self,
+        mac: str,
+    ) -> dict[str, Any] | None:
+        """Find a registration-table entry by MAC address."""
+
+        entries = await self.registration_table()
+
+        mac_lower = mac.lower()
+
+        for entry in entries:
+            if entry.get("mac-address", "").lower() == mac_lower:
+                return entry
+
+        return None
+
+    async def find_lease_by_mac(
+        self,
+        mac: str,
+    ) -> dict[str, Any] | None:
+        """Find a DHCP lease entry by MAC address."""
+
+        leases = await self.get_leases()
+
+        mac_lower = mac.lower()
+
+        for lease in leases:
+            if lease.get("mac-address", "").lower() == mac_lower:
+                return lease
+
+        return None
+
+    async def disconnect(
+        self,
+        mac: str,
+    ) -> None:
+        """Force-disconnect a WiFi client by deleting its registration-table entry."""
+
+        entry = await self.find_registration_by_mac(mac)
+
+        if entry is None:
+            raise ApiError(f"No active registration found for {mac}")
+
+        await self._request(
+            "DELETE",
+            f"/interface/wifi/registration-table/{entry['.id']}",
+        )
+
     # --------------------------------------------------------
     # Generic
     # --------------------------------------------------------
