@@ -18,7 +18,9 @@ from .const import (
     CONF_USERNAME,
     DOMAIN,
     SERVICE_APPROVE,
+    SERVICE_APPROVE_ALL_CURRENT,
     SERVICE_DISCONNECT,
+    SERVICE_ENABLE_STRICT_MODE,
     SERVICE_MAKE_STATIC,
     SERVICE_REJECT,
 )
@@ -62,6 +64,14 @@ async def async_setup_entry(
     )
 
     coordinator = MikrotikWifiCoordinator(hass, api)
+
+    try:
+        await api.ensure_logging_rule()
+    except Exception:  # noqa: BLE001
+        # Non-fatal: strict-mode log-based detection just won't work
+        # until the logging rule can be created (e.g. permissions).
+        pass
+
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})
@@ -137,6 +147,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         await api.make_static(lease[".id"])
 
+    async def handle_approve_all_current(call: ServiceCall) -> None:
+        api = _get_first_api(hass)
+        await api.approve_all_current()
+
+    async def handle_enable_strict_mode(call: ServiceCall) -> None:
+        api = _get_first_api(hass)
+        await api.enable_strict_mode()
+
     hass.services.async_register(
         DOMAIN, SERVICE_APPROVE, handle_approve, schema=SERVICE_MAC_SCHEMA
     )
@@ -154,4 +172,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_MAKE_STATIC,
         handle_make_static,
         schema=SERVICE_MAC_ONLY_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_APPROVE_ALL_CURRENT,
+        handle_approve_all_current,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ENABLE_STRICT_MODE,
+        handle_enable_strict_mode,
     )

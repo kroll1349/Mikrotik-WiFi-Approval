@@ -59,3 +59,18 @@ make_static:
       example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
+
+approve_all_current:
+  name: Approve all currently connected devices
+  description: >-
+    Adds an explicit "accept" access-list entry for every device that is
+    currently connected and not already decided. Run this BEFORE enabling
+    strict mode, so none of your existing devices get locked out.
+
+enable_strict_mode:
+  name: Enable strict mode (block unapproved devices)
+  description: >-
+    Runs approve_all_current, then adds a catch-all "reject" rule at the
+    end of the access-list. After this, any device without an explicit
+    accept entry will be refused at connection time and must be approved
+    from Home Assistant before it can join the WiFi.

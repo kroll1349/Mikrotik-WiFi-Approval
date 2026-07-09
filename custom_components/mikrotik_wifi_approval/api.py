@@ -6,6 +6,7 @@ from typing import Any
 
 import aiohttp
 
+from .const import CATCHALL_COMMENT, LOGGING_RULE_COMMENT, LOGGING_TOPICS
 from .exceptions import (
     ApiError,
     CannotConnect,
@@ -102,7 +103,7 @@ class MikrotikApiClient:
     ) -> dict[str, Any]:
         """Approve WiFi device."""
 
-        return await self._request(
+        result = await self._request(
             "PUT",
             "/interface/wifi/access-list",
             {
@@ -112,6 +113,10 @@ class MikrotikApiClient:
             },
         )
 
+        await self.bump_catchall()
+
+        return result
+
     async def reject(
         self,
         mac: str,
@@ -119,7 +124,7 @@ class MikrotikApiClient:
     ) -> dict[str, Any]:
         """Reject WiFi device."""
 
-        return await self._request(
+        result = await self._request(
             "PUT",
             "/interface/wifi/access-list",
             {
@@ -128,6 +133,10 @@ class MikrotikApiClient:
                 "comment": comment,
             },
         )
+
+        await self.bump_catchall()
+
+        return result
 
     async def delete_access(
         self,
@@ -222,6 +231,137 @@ class MikrotikApiClient:
             "DELETE",
             f"/interface/wifi/registration-table/{entry['.id']}",
         )
+
+    # --------------------------------------------------------
+    # Strict mode: catch-all reject rule + bulk approve
+    # --------------------------------------------------------
+
+    async def _find_catchall(self) -> dict[str, Any] | None:
+        """Find the tagged catch-all reject rule, if it exists."""
+
+        entries = await self.get_access_list()
+
+        for entry in entries:
+            if entry.get("comment") == CATCHALL_COMMENT:
+                return entry
+
+        return None
+
+    async def bump_catchall(self) -> None:
+        """Re-create the catch-all reject rule so it stays the LAST rule.
+
+        RouterOS access-list rules are evaluated top to bottom, and newly
+        added rules are appended at the end. Whenever we add a new
+        accept/reject rule for a specific MAC, the catch-all rule (if it
+        exists) must be deleted and re-added so it remains last.
+
+        No-op if strict mode hasn't been enabled yet (no catch-all rule).
+        """
+
+        existing = await self._find_catchall()
+
+        if existing is None:
+            return
+
+        await self._request(
+            "DELETE",
+            f"/interface/wifi/access-list/{existing['.id']}",
+        )
+
+        await self._create_catchall()
+
+    async def _create_catchall(self) -> None:
+        """Create the tagged catch-all reject rule."""
+
+        await self._request(
+            "PUT",
+            "/interface/wifi/access-list",
+            {
+                "action": "reject",
+                "comment": CATCHALL_COMMENT,
+            },
+        )
+
+    async def enable_strict_mode(self) -> None:
+        """Approve every currently connected device, then enable the
+        catch-all reject rule.
+
+        This is the safe order: run this once and every device that is
+        already trusted on your network keeps working, while any device
+        that connects afterwards (or reconnects after being removed)
+        must be explicitly approved.
+        """
+
+        await self.approve_all_current()
+
+        if await self._find_catchall() is None:
+            await self._create_catchall()
+
+    async def approve_all_current(self) -> int:
+        """Add an explicit 'accept' rule for every currently connected
+        device that doesn't already have one. Returns how many were added.
+        """
+
+        registration = await self.registration_table()
+        access_list = await self.get_access_list()
+
+        decided_macs = {
+            entry.get("mac-address", "").lower()
+            for entry in access_list
+            if entry.get("mac-address")
+        }
+
+        added = 0
+
+        for entry in registration:
+            mac = entry.get("mac-address", "")
+
+            if not mac or mac.lower() in decided_macs:
+                continue
+
+            await self._request(
+                "PUT",
+                "/interface/wifi/access-list",
+                {
+                    "mac-address": mac,
+                    "action": "accept",
+                    "comment": "auto-approved (already connected)",
+                },
+            )
+
+            decided_macs.add(mac.lower())
+            added += 1
+
+        return added
+
+    # --------------------------------------------------------
+    # Log reading (to catch attempts that never reach the
+    # registration-table because they were rejected outright)
+    # --------------------------------------------------------
+
+    async def ensure_logging_rule(self) -> None:
+        """Make sure a memory logging rule for wifi/debug exists."""
+
+        rules = await self._request("GET", "/system/logging")
+
+        for rule in rules:
+            if rule.get("comment") == LOGGING_RULE_COMMENT:
+                return
+
+        await self._request(
+            "PUT",
+            "/system/logging",
+            {
+                "topics": LOGGING_TOPICS,
+                "action": "memory",
+                "comment": LOGGING_RULE_COMMENT,
+            },
+        )
+
+    async def get_logs(self) -> list[dict[str, Any]]:
+        """Return current system log entries."""
+
+        return await self._request("GET", "/log")
 
     # --------------------------------------------------------
     # Generic
