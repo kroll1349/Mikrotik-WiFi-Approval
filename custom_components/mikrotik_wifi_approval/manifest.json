@@ -7,7 +7,7 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/kroll1349/Mikrotik-WiFi-Approval",
-  "integration_type": "hube",
+  "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/kroll1349/Mikrotik-WiFi-Approval/issues",
   "loggers": [
