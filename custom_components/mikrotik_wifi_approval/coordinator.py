@@ -125,6 +125,22 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     comment=entry.get("comment", ""),
                 )
 
+                if strict_mode:
+                    # Backstop: on some RouterOS/wifi-qcom firmware, the
+                    # access-list reject rule doesn't reliably block every
+                    # connection attempt (a known quirk - the device can
+                    # slip through on a retry). Actively kick anything
+                    # that isn't approved, every poll cycle, so it never
+                    # stays connected for more than ~DEFAULT_SCAN_INTERVAL
+                    # seconds while undecided.
+                    try:
+                        await self.api.disconnect(mac)
+                    except Exception:  # noqa: BLE001
+                        # Already gone by the time we tried, or a
+                        # transient API error - nothing to do here, the
+                        # next poll will try again if it's still there.
+                        pass
+
         # --- 2. Blocked attempts, detected via the router log ---
 
         if strict_mode:
