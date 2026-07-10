@@ -276,8 +276,11 @@ class MikrotikApiClient:
         Note: on some RouterOS/wifi-qcom firmware versions (observed on
         AX2/AX3 hardware), an access-list rule with NO matching criteria
         at all is silently ignored by the firmware, even though the
-        official docs say an empty rule should match everything. Adding
-        an explicit (but always-true) signal-range works around this.
+        official docs say an empty rule should match everything. We work
+        around this two ways: an explicit always-true signal-range, AND
+        the classic MikroTik "match any MAC" wildcard (mac-address
+        00:00:00:00:00:00 with an all-zero mask, meaning "ignore every
+        bit of the MAC when matching").
         """
 
         await self._request(
@@ -287,6 +290,8 @@ class MikrotikApiClient:
                 "action": "reject",
                 "comment": CATCHALL_COMMENT,
                 "signal-range": "-120..120",
+                "mac-address": "00:00:00:00:00:00",
+                "mac-address-mask": "00:00:00:00:00:00",
             },
         )
 
