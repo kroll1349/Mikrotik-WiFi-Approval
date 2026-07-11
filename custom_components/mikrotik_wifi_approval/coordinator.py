@@ -99,11 +99,53 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         pending: list[dict[str, Any]] = []
 
-        # --- 1. Devices connected but not yet decided (pre-strict-mode) ---
+        # --- 1. Devices connected but not yet decided ---
 
-        if self._baseline is None:
-            # First poll ever: everything currently connected is
-            # considered "already known", not a pending approval.
+        if strict_mode:
+            # Once strict mode is on, the access-list is the ONLY source
+            # of truth. The pre-strict-mode "baseline" (whatever was
+            # connected before strict mode existed) no longer grants a
+            # free pass - otherwise a device that happened to be
+            # connected during an integration reload would be exempted
+            # forever, even after being removed and reconnecting.
+            for entry in registration:
+                mac = entry.get("mac-address", "")
+
+                if not mac:
+                    continue
+
+                mac_lower = mac.lower()
+
+                if mac_lower in decided_macs:
+                    continue
+
+                self._notify_pending(
+                    pending,
+                    mac=mac,
+                    interface=entry.get("interface"),
+                    ip=entry.get("last-ip"),
+                    comment=entry.get("comment", ""),
+                )
+
+                # Backstop: on some RouterOS/wifi-qcom firmware, the
+                # access-list reject rule doesn't reliably block every
+                # connection attempt (a known quirk - the device can
+                # slip through on a retry). Actively kick anything
+                # that isn't approved, every poll cycle, so it never
+                # stays connected for more than ~DEFAULT_SCAN_INTERVAL
+                # seconds while undecided.
+                try:
+                    await self.api.disconnect(mac)
+                except Exception:  # noqa: BLE001
+                    # Already gone by the time we tried, or a
+                    # transient API error - nothing to do here, the
+                    # next poll will try again if it's still there.
+                    pass
+        elif self._baseline is None:
+            # First poll ever, strict mode not enabled yet: everything
+            # currently connected is considered "already known", not a
+            # pending approval. This is purely informational until you
+            # run enable_strict_mode.
             self._baseline = set(seen_macs)
         else:
             for entry in registration:
@@ -124,22 +166,6 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     ip=entry.get("last-ip"),
                     comment=entry.get("comment", ""),
                 )
-
-                if strict_mode:
-                    # Backstop: on some RouterOS/wifi-qcom firmware, the
-                    # access-list reject rule doesn't reliably block every
-                    # connection attempt (a known quirk - the device can
-                    # slip through on a retry). Actively kick anything
-                    # that isn't approved, every poll cycle, so it never
-                    # stays connected for more than ~DEFAULT_SCAN_INTERVAL
-                    # seconds while undecided.
-                    try:
-                        await self.api.disconnect(mac)
-                    except Exception:  # noqa: BLE001
-                        # Already gone by the time we tried, or a
-                        # transient API error - nothing to do here, the
-                        # next poll will try again if it's still there.
-                        pass
 
         # --- 2. Blocked attempts, detected via the router log ---
 

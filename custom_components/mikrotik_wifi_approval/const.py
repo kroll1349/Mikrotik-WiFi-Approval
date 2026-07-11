@@ -48,5 +48,6 @@ CATCHALL_COMMENT = "ha_catchall_reject"
 # detect connection attempts that get rejected before ever reaching
 # the registration-table.
 LOGGING_RULE_COMMENT = "ha_wifi_debug"
-LOGGING_TOPICS = "wireless,debug"
+LOGGING_TOPICS = "wifi,debug"
+
 PLATFORMS: list[str] = []
