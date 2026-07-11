@@ -37,6 +37,17 @@ blueprint:
       selector:
         text:
           multiline: true
+    pending_sensor:
+      name: Pending devices sensor (optional)
+      description: >-
+        If set, tapping the notification body (not the Approve/Reject
+        buttons) opens this entity's more-info dialog instead of the
+        default Home Assistant dashboard. Pick your
+        "Pending devices" sensor from the integration.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
 
 trigger:
   - platform: event
@@ -62,6 +73,7 @@ action:
       notify_title: !input title
       known_devices: !input known_devices
       known_devices_map: "{{ (known_devices | from_yaml) if known_devices | trim != '' else {} }}"
+      pending_sensor: !input pending_sensor
   - choose:
       # --- Branch 1: a new/unapproved device was detected ---
       - conditions: "{{ trigger.id == 'new_device' }}"
@@ -83,6 +95,7 @@ action:
                       sticky: "true"
                       channel: "MikroTik WiFi Approval"
                       tag: "mikrotik_{{ mac | replace(':','') }}"
+                      entity_id: "{{ pending_sensor }}"
                       actions:
                         - action: "MIKROTIK_APPROVE_{{ mac | replace(':','') }}"
                           title: "✅ Aprobă"
