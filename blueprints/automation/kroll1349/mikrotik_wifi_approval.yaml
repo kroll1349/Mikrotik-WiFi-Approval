@@ -10,13 +10,17 @@ blueprint:
   domain: automation
   source_url: https://github.com/kroll1349/Mikrotik-WiFi-Approval/blob/main/blueprints/automation/kroll1349/mikrotik_wifi_approval.yaml
   input:
-    notify_service:
-      name: Notify service
+    notify_devices:
+      name: Telefoane pentru notificare
       description: >-
-        The exact notify service for your phone, e.g. notify.mobile_app_iphone_de_kroll
-        (find it under Developer Tools > Actions by searching "mobile_app").
+        Alege unul sau mai multe telefoane/tablete cu aplicația Home
+        Assistant Companion instalată, care vor primi notificarea de
+        aprobare.
       selector:
-        text:
+        device:
+          filter:
+            integration: mobile_app
+          multiple: true
     title:
       name: Notification title
       default: "📶 Dispozitiv WiFi nou"
@@ -54,7 +58,7 @@ condition:
 
 action:
   - variables:
-      notify_target: !input notify_service
+      notify_devices: !input notify_devices
       notify_title: !input title
       known_devices: !input known_devices
   - choose:
@@ -65,22 +69,25 @@ action:
               mac: "{{ trigger.event.data.mac }}"
               known_devices_map: "{{ (known_devices | from_yaml) if known_devices | trim != '' else {} }}"
               device_name: "{{ known_devices_map.get(mac, 'Dispozitiv necunoscut') }}"
-          - service: "{{ notify_target }}"
-            data:
-              title: "{{ notify_title }}: {{ device_name }}"
-              message: >
-                MAC: {{ mac }}
-                {% if trigger.event.data.interface %}Interfață: {{ trigger.event.data.interface }}
-                {% endif %}{% if trigger.event.data.comment %}Info: {{ trigger.event.data.comment }}{% endif %}
-              data:
-                sticky: "true"
-                channel: "MikroTik WiFi Approval"
-                tag: "mikrotik_{{ mac | replace(':','') }}"
-                actions:
-                  - action: "MIKROTIK_APPROVE_{{ mac | replace(':','') }}"
-                    title: "✅ Aprobă"
-                  - action: "MIKROTIK_REJECT_{{ mac | replace(':','') }}"
-                    title: "❌ Respinge"
+          - repeat:
+              for_each: "{{ notify_devices }}"
+              sequence:
+                - service: "{{ 'notify.mobile_app_' + (device_attr(repeat.item, 'name') | slugify) }}"
+                  data:
+                    title: "{{ notify_title }}: {{ device_name }}"
+                    message: >
+                      MAC: {{ mac }}
+                      {% if trigger.event.data.interface %}Interfață: {{ trigger.event.data.interface }}
+                      {% endif %}{% if trigger.event.data.comment %}Info: {{ trigger.event.data.comment }}{% endif %}
+                    data:
+                      sticky: "true"
+                      channel: "MikroTik WiFi Approval"
+                      tag: "mikrotik_{{ mac | replace(':','') }}"
+                      actions:
+                        - action: "MIKROTIK_APPROVE_{{ mac | replace(':','') }}"
+                          title: "✅ Aprobă"
+                        - action: "MIKROTIK_REJECT_{{ mac | replace(':','') }}"
+                          title: "❌ Respinge"
 
       # --- Branch 2: the user tapped Approve/Reject on the notification ---
       - conditions: "{{ trigger.id == 'notification_action' }}"
@@ -103,17 +110,18 @@ action:
                     data:
                       mac: "{{ mac }}"
                       comment: "Respins de admin"
-          - if: "{{ notify_target | trim != '' }}"
-            then:
-              # Clear the sticky notification (same tag used above).
-              - service: "{{ notify_target }}"
-                data:
-                  message: "clear_notification"
+          - repeat:
+              for_each: "{{ notify_devices }}"
+              sequence:
+                # Clear the sticky notification (same tag used above).
+                - service: "{{ 'notify.mobile_app_' + (device_attr(repeat.item, 'name') | slugify) }}"
                   data:
-                    tag: "mikrotik_{{ raw_mac }}"
-              - service: "{{ notify_target }}"
-                data:
-                  message: >
-                    {% if is_approve %}✅ Acceptat de admin: {{ mac }}{% else %}❌ Respins de admin: {{ mac }}{% endif %}
+                    message: "clear_notification"
+                    data:
+                      tag: "mikrotik_{{ raw_mac }}"
+                - service: "{{ 'notify.mobile_app_' + (device_attr(repeat.item, 'name') | slugify) }}"
+                  data:
+                    message: >
+                      {% if is_approve %}✅ Acceptat de admin: {{ mac }}{% else %}❌ Respins de admin: {{ mac }}{% endif %}
 
 mode: parallel
