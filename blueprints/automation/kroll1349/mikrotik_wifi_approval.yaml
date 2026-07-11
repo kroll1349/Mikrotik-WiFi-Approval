@@ -1,0 +1,119 @@
+blueprint:
+  name: MikroTik WiFi Approval - Notify and handle response
+  description: >-
+    All-in-one blueprint: sends a sticky push notification with
+    Approve/Reject buttons whenever the MikroTik WiFi Approval integration
+    detects an unapproved device, and also handles the button tap to call
+    the matching mikrotik_wifi_approval service. Requires the
+    `mikrotik_wifi_approval` custom integration
+    (https://github.com/kroll1349/Mikrotik-WiFi-Approval).
+  domain: automation
+  source_url: https://github.com/kroll1349/Mikrotik-WiFi-Approval/blob/main/blueprints/automation/kroll1349/mikrotik_wifi_approval.yaml
+  input:
+    notify_service:
+      name: Notify service
+      description: >-
+        The exact notify service for your phone, e.g. notify.mobile_app_iphone_de_kroll
+        (find it under Developer Tools > Actions by searching "mobile_app").
+      selector:
+        text:
+    title:
+      name: Notification title
+      default: "📶 Dispozitiv WiFi nou"
+      selector:
+        text:
+    known_devices:
+      name: Known devices (optional)
+      description: >-
+        YAML mapping of MAC address to a friendly name, so recognized phones
+        show a name instead of just a MAC. Example:
+        "AA:BB:CC:DD:EE:FF: Telefon Ana". One per line. Leave empty if you
+        don't want named lookups.
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+trigger:
+  - platform: event
+    event_type: mikrotik_wifi_new_device
+    id: "new_device"
+  - platform: event
+    event_type: mobile_app_notification_action
+    id: "notification_action"
+
+condition:
+  - condition: or
+    conditions:
+      - "{{ trigger.id == 'new_device' }}"
+      - condition: template
+        value_template: >
+          {{ trigger.id == 'notification_action' and
+             (trigger.event.data.action.startswith('MIKROTIK_APPROVE_')
+              or trigger.event.data.action.startswith('MIKROTIK_REJECT_')) }}
+
+action:
+  - variables:
+      notify_target: !input notify_service
+      notify_title: !input title
+      known_devices: !input known_devices
+  - choose:
+      # --- Branch 1: a new/unapproved device was detected ---
+      - conditions: "{{ trigger.id == 'new_device' }}"
+        sequence:
+          - variables:
+              mac: "{{ trigger.event.data.mac }}"
+              known_devices_map: "{{ (known_devices | from_yaml) if known_devices | trim != '' else {} }}"
+              device_name: "{{ known_devices_map.get(mac, 'Dispozitiv necunoscut') }}"
+          - service: "{{ notify_target }}"
+            data:
+              title: "{{ notify_title }}: {{ device_name }}"
+              message: >
+                MAC: {{ mac }}
+                {% if trigger.event.data.interface %}Interfață: {{ trigger.event.data.interface }}
+                {% endif %}{% if trigger.event.data.comment %}Info: {{ trigger.event.data.comment }}{% endif %}
+              data:
+                sticky: "true"
+                channel: "MikroTik WiFi Approval"
+                tag: "mikrotik_{{ mac | replace(':','') }}"
+                actions:
+                  - action: "MIKROTIK_APPROVE_{{ mac | replace(':','') }}"
+                    title: "✅ Aprobă"
+                  - action: "MIKROTIK_REJECT_{{ mac | replace(':','') }}"
+                    title: "❌ Respinge"
+
+      # --- Branch 2: the user tapped Approve/Reject on the notification ---
+      - conditions: "{{ trigger.id == 'notification_action' }}"
+        sequence:
+          - variables:
+              raw_mac: "{{ trigger.event.data.action.split('_')[-1] }}"
+              mac: >
+                {{ raw_mac[0:2] }}:{{ raw_mac[2:4] }}:{{ raw_mac[4:6] }}:{{ raw_mac[6:8] }}:{{ raw_mac[8:10] }}:{{ raw_mac[10:12] }}
+              is_approve: "{{ trigger.event.data.action.startswith('MIKROTIK_APPROVE_') }}"
+          - choose:
+              - conditions: "{{ is_approve }}"
+                sequence:
+                  - service: mikrotik_wifi_approval.approve
+                    data:
+                      mac: "{{ mac }}"
+                      comment: "Acceptat de admin"
+              - conditions: "{{ not is_approve }}"
+                sequence:
+                  - service: mikrotik_wifi_approval.reject
+                    data:
+                      mac: "{{ mac }}"
+                      comment: "Respins de admin"
+          - if: "{{ notify_target | trim != '' }}"
+            then:
+              # Clear the sticky notification (same tag used above).
+              - service: "{{ notify_target }}"
+                data:
+                  message: "clear_notification"
+                  data:
+                    tag: "mikrotik_{{ raw_mac }}"
+              - service: "{{ notify_target }}"
+                data:
+                  message: >
+                    {% if is_approve %}✅ Acceptat de admin: {{ mac }}{% else %}❌ Respins de admin: {{ mac }}{% endif %}
+
+mode: parallel
