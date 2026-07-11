@@ -169,22 +169,14 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if strict_mode:
             try:
                 log_entries = await self.api.get_logs()
-            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Fetched %d log entries", len(log_entries))
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("Failed to fetch RouterOS logs: %s", err)
                 log_entries = []
 
+            seen_in_log: set[str] = set()
+
             for entry in log_entries:
-                entry_id = entry.get(".id", "")
-
-                try:
-                    numeric_id = int(entry_id.lstrip("*"), 16)
-                except (ValueError, AttributeError):
-                    continue
-
-                if numeric_id <= self._last_log_id:
-                    continue
-
-                self._last_log_id = max(self._last_log_id, numeric_id)
-
                 message = entry.get("message", "")
 
                 if not any(kw in message.lower() for kw in ATTEMPT_KEYWORDS):
@@ -198,8 +190,10 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 mac = match.group(1)
                 mac_lower = mac.lower()
 
-                if mac_lower in decided_macs:
+                if mac_lower in decided_macs or mac_lower in seen_in_log:
                     continue
+
+                seen_in_log.add(mac_lower)
 
                 self._notify_pending(
                     pending, mac=mac, interface=None, ip=None, comment=""
