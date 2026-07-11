@@ -27,7 +27,7 @@ from .const import (
 from .coordinator import MikrotikWifiCoordinator
 from .exceptions import ApiError
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.DEVICE_TRACKER]
 
 SERVICE_MAC_SCHEMA = vol.Schema(
     {
