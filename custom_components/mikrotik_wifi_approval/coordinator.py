@@ -32,11 +32,8 @@ MAC_RE = re.compile(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
 # intentionally loose - if it misses lines on your router, share a
 # sample log line so the pattern can be tightened.
 ATTEMPT_KEYWORDS = (
-    "attempts to connect",
-    "not in local acl",
-    "not in access list",
-    "sent deauth",
-    "rejected",
+    "connection rejected",
+    "forbidden by access-list",
 )
 
 
