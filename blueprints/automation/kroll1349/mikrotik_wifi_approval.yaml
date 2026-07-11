@@ -61,13 +61,13 @@ action:
       notify_devices: !input notify_devices
       notify_title: !input title
       known_devices: !input known_devices
+      known_devices_map: "{{ (known_devices | from_yaml) if known_devices | trim != '' else {} }}"
   - choose:
       # --- Branch 1: a new/unapproved device was detected ---
       - conditions: "{{ trigger.id == 'new_device' }}"
         sequence:
           - variables:
               mac: "{{ trigger.event.data.mac }}"
-              known_devices_map: "{{ (known_devices | from_yaml) if known_devices | trim != '' else {} }}"
               device_name: "{{ known_devices_map.get(mac, 'Dispozitiv necunoscut') }}"
           - repeat:
               for_each: "{{ notify_devices }}"
@@ -97,19 +97,20 @@ action:
               mac: >
                 {{ raw_mac[0:2] }}:{{ raw_mac[2:4] }}:{{ raw_mac[4:6] }}:{{ raw_mac[6:8] }}:{{ raw_mac[8:10] }}:{{ raw_mac[10:12] }}
               is_approve: "{{ trigger.event.data.action.startswith('MIKROTIK_APPROVE_') }}"
+              device_name: "{{ known_devices_map.get(mac, mac) }}"
           - choose:
               - conditions: "{{ is_approve }}"
                 sequence:
                   - service: mikrotik_wifi_approval.approve
                     data:
                       mac: "{{ mac }}"
-                      comment: "Acceptat de admin"
+                      comment: "{{ device_name }}"
               - conditions: "{{ not is_approve }}"
                 sequence:
                   - service: mikrotik_wifi_approval.reject
                     data:
                       mac: "{{ mac }}"
-                      comment: "Respins de admin"
+                      comment: "{{ device_name }} (respins)"
           - repeat:
               for_each: "{{ notify_devices }}"
               sequence:
@@ -122,6 +123,6 @@ action:
                 - service: "{{ 'notify.mobile_app_' + (device_attr(repeat.item, 'name') | slugify) }}"
                   data:
                     message: >
-                      {% if is_approve %}✅ Acceptat de admin: {{ mac }}{% else %}❌ Respins de admin: {{ mac }}{% endif %}
+                      {% if is_approve %}✅ Acceptat de admin: {{ device_name }}{% else %}❌ Respins de admin: {{ device_name }}{% endif %}
 
 mode: parallel
