@@ -151,7 +151,10 @@ class ConnectedClientsSensor(CoordinatorEntity[MikrotikWifiCoordinator], SensorE
                     ATTR_INTERFACE: entry_row.get("interface"),
                     "ip": entry_row.get("last-ip") or lease.get("address"),
                     "uptime": entry_row.get("uptime"),
+                    "signal": entry_row.get("signal-strength"),
                     "connection": "wifi",
+                    "approved": access.get("action") == "accept",
+                    "pending": mac_lower not in access_by_mac,
                 }
             )
 
@@ -179,7 +182,10 @@ class ConnectedClientsSensor(CoordinatorEntity[MikrotikWifiCoordinator], SensorE
                     ATTR_INTERFACE: arp_entry.get("interface"),
                     "ip": arp_entry.get("address") or lease.get("address"),
                     "uptime": None,
+                    "signal": None,
                     "connection": "lan",
+                    "approved": None,
+                    "pending": False,
                 }
             )
 
