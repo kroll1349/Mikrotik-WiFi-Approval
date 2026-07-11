@@ -1,4 +1,10 @@
-"""Device tracker platform for MikroTik WiFi Approval."""
+"""Device tracker platform for MikroTik WiFi Approval.
+
+Covers WiFi clients (via the wifi registration-table, same source used
+for approval) AND wired/LAN clients (via ARP + DHCP leases), so every
+device that has ever shown up on the router - WiFi or Ethernet - gets
+an entity.
+"""
 
 from __future__ import annotations
 
@@ -19,29 +25,21 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up device_tracker entities for known WiFi clients."""
+    """Set up device_tracker entities for every known client (WiFi + LAN)."""
 
     coordinator: MikrotikWifiCoordinator = hass.data[DOMAIN][entry.entry_id]
     known_macs: set[str] = set()
 
     @callback
     def _add_new_entities() -> None:
-        registration = coordinator.data.get("registration", [])
-        access_list = coordinator.data.get("access_list", [])
+        data = coordinator.data
 
-        # Un dispozitiv merită o entitate din momentul în care apare fie
-        # ca fiind conectat acum (registration-table), fie ca fiind deja
-        # decis (access-list) - altfel un device aprobat dar deconectat
-        # ar dispărea din HA.
-        all_macs = {
-            entry_row.get("mac-address", "").lower()
-            for entry_row in registration
-            if entry_row.get("mac-address")
-        } | {
-            entry_row.get("mac-address", "").lower()
-            for entry_row in access_list
-            if entry_row.get("mac-address")
-        }
+        all_macs: set[str] = set()
+        for source_key in ("registration", "access_list", "leases", "arp"):
+            for row in data.get(source_key, []):
+                mac = row.get("mac-address", "")
+                if mac:
+                    all_macs.add(mac.lower())
 
         new_entities = [
             MikrotikDeviceTracker(coordinator, entry, mac)
@@ -50,7 +48,7 @@ async def async_setup_entry(
         ]
 
         if new_entities:
-            known_macs.update(mac.mac_address_lower for mac in new_entities)
+            known_macs.update(e.mac_address_lower for e in new_entities)
             async_add_entities(new_entities)
 
     _add_new_entities()
@@ -58,7 +56,7 @@ async def async_setup_entry(
 
 
 class MikrotikDeviceTracker(CoordinatorEntity[MikrotikWifiCoordinator], ScannerEntity):
-    """Track a single WiFi client seen in the registration-table."""
+    """Track a single client, wireless or wired."""
 
     _attr_has_entity_name = True
     _attr_source_type = SourceType.ROUTER
@@ -81,56 +79,94 @@ class MikrotikDeviceTracker(CoordinatorEntity[MikrotikWifiCoordinator], ScannerE
             "manufacturer": "MikroTik",
         }
 
-    @property
-    def _registration_entry(self) -> dict[str, Any] | None:
-        """Return the live registration-table row for this MAC, if connected."""
+    # ----- lookups across the four data sources -----
 
-        for row in self.coordinator.data.get("registration", []):
+    def _find(self, source_key: str) -> dict[str, Any] | None:
+        for row in self.coordinator.data.get(source_key, []):
             if row.get("mac-address", "").lower() == self.mac_address_lower:
                 return row
         return None
+
+    @property
+    def _registration_entry(self) -> dict[str, Any] | None:
+        return self._find("registration")
 
     @property
     def _access_list_entry(self) -> dict[str, Any] | None:
-        """Return the access-list row for this MAC, if it has been decided."""
+        return self._find("access_list")
 
-        for row in self.coordinator.data.get("access_list", []):
-            if row.get("mac-address", "").lower() == self.mac_address_lower:
-                return row
-        return None
+    @property
+    def _lease_entry(self) -> dict[str, Any] | None:
+        return self._find("leases")
+
+    @property
+    def _arp_entry(self) -> dict[str, Any] | None:
+        return self._find("arp")
+
+    # ----- entity properties -----
 
     @property
     def name(self) -> str:
-        """Prefer the access-list comment, then registration comment, then MAC."""
+        access = self._access_list_entry or {}
+        reg = self._registration_entry or {}
+        lease = self._lease_entry or {}
 
-        access = self._access_list_entry
-        reg = self._registration_entry
-
-        comment = (access or {}).get("comment") or (reg or {}).get("comment")
-
-        return comment or self.mac_address_lower
+        return (
+            access.get("comment")
+            or reg.get("comment")
+            or lease.get("host-name")
+            or lease.get("comment")
+            or self.mac_address_lower
+        )
 
     @property
     def is_connected(self) -> bool:
-        """A device is 'home' only while it's live in the registration-table."""
+        """Home if seen live on WiFi (registration-table) or resolvable
+        right now on the LAN (a 'complete', non-stale ARP entry).
 
-        return self._registration_entry is not None
+        A DHCP lease alone is NOT enough - leases persist for the full
+        lease time even after the device goes offline, so relying on
+        them would make everything look permanently 'home'.
+        """
+
+        if self._registration_entry is not None:
+            return True
+
+        arp = self._arp_entry
+        if arp is not None and arp.get("complete") in (True, "true"):
+            return True
+
+        return False
 
     @property
     def mac_address(self) -> str:
         return self.mac_address_lower
 
     @property
+    def ip_address(self) -> str | None:
+        reg = self._registration_entry or {}
+        arp = self._arp_entry or {}
+        lease = self._lease_entry or {}
+
+        return reg.get("last-ip") or arp.get("address") or lease.get("address")
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         reg = self._registration_entry or {}
         access = self._access_list_entry or {}
+        arp = self._arp_entry or {}
+        lease = self._lease_entry or {}
+
+        connection = "wifi" if reg else ("lan" if arp or lease else "unknown")
 
         return {
-            "interface": reg.get("interface"),  # ac2 / ax2
+            "connection": connection,
+            "interface": reg.get("interface") or arp.get("interface"),  # ac2/ax2 sau ether-ul de LAN
             "signal_strength": reg.get("signal-strength"),
             "tx_rate": reg.get("tx-rate"),
             "rx_rate": reg.get("rx-rate"),
             "uptime": reg.get("uptime"),
-            "last_ip": reg.get("last-ip"),
+            "ip_address": self.ip_address,
+            "hostname": lease.get("host-name"),
             "approved": access.get("action") == "accept",
         }

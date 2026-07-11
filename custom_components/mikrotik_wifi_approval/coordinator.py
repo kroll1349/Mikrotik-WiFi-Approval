@@ -78,6 +78,23 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         registration = await self.api.registration_table()
         access_list = await self.api.get_access_list()
 
+        # DHCP leases + ARP table are only used to extend device_tracker
+        # coverage to wired/LAN clients (phones, tablets, laptops) that
+        # never touch the WiFi registration-table. They play no role in
+        # the approve/reject/strict-mode logic below, which stays
+        # WiFi-only on purpose.
+        try:
+            leases = await self.api.get_leases()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Failed to fetch DHCP leases: %s", err)
+            leases = []
+
+        try:
+            arp_table = await self.api.get_arp_table()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Failed to fetch ARP table: %s", err)
+            arp_table = []
+
         decided_macs = {
             entry.get("mac-address", "").lower()
             for entry in access_list
@@ -209,6 +226,8 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "registration": registration,
             "access_list": access_list,
             "strict_mode": strict_mode,
+            "leases": leases,
+            "arp": arp_table,
         }
 
     def _notify_pending(

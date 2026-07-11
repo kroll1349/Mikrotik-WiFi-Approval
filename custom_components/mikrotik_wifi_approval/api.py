@@ -216,6 +216,25 @@ class MikrotikApiClient:
 
         return None
 
+    # --------------------------------------------------------
+    # ARP (live L2 presence for LAN/wired clients)
+    # --------------------------------------------------------
+
+    async def get_arp_table(self) -> list[dict[str, Any]]:
+        """Return the ARP table (any interface, wired or wireless).
+
+        DHCP leases stay 'bound' for the whole lease duration regardless
+        of whether the device is actually online right now, so they're
+        not reliable for presence detection. The ARP table reflects
+        which MACs are currently resolvable on the LAN, which is a much
+        better proxy for "is this device home" for wired clients.
+        """
+
+        return await self._request(
+            "GET",
+            "/ip/arp",
+        )
+
     async def disconnect(
         self,
         mac: str,
