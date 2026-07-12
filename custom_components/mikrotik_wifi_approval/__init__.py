@@ -104,12 +104,13 @@ async def async_unload_entry(
     return unload_ok
 
 
-def _get_first_api(hass: HomeAssistant) -> MikrotikApiClient:
-    """Return the API client of the first configured entry.
+def _get_all_apis(hass: HomeAssistant) -> list[MikrotikApiClient]:
+    """Return the API clients of every configured entry (AX2, AC2, ...).
 
-    Most setups only have one router. If multiple entries exist,
-    services act on the first one unless extended to target a specific
-    device.
+    With more than one router/AP configured, a MAC that's currently
+    associated to one won't exist on the other's registration-table -
+    calling an action against the wrong one fails even though the
+    device is perfectly reachable on a sibling router.
     """
 
     coordinators = list(hass.data.get(DOMAIN, {}).values())
@@ -117,7 +118,7 @@ def _get_first_api(hass: HomeAssistant) -> MikrotikApiClient:
     if not coordinators:
         raise ApiError("No MikroTik WiFi Approval config entry is set up")
 
-    return coordinators[0].api
+    return [c.api for c in coordinators]
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
@@ -127,33 +128,60 @@ def _async_register_services(hass: HomeAssistant) -> None:
         return
 
     async def handle_approve(call: ServiceCall) -> None:
-        api = _get_first_api(hass)
-        await api.approve(call.data[ATTR_MAC], call.data.get(ATTR_COMMENT, ""))
+        # Aplicăm pe toate routerele - device-ul poate roam între AX2 și
+        # AC2, deci vrem acces aprobat peste tot, nu doar pe unul.
+        errors: list[str] = []
+        for api in _get_all_apis(hass):
+            try:
+                await api.approve(call.data[ATTR_MAC], call.data.get(ATTR_COMMENT, ""))
+            except Exception as err:  # noqa: BLE001
+                errors.append(str(err))
+
+        if errors and len(errors) == len(_get_all_apis(hass)):
+            raise ApiError("; ".join(errors))
 
     async def handle_reject(call: ServiceCall) -> None:
-        api = _get_first_api(hass)
-        await api.reject(call.data[ATTR_MAC], call.data.get(ATTR_COMMENT, ""))
+        errors: list[str] = []
+        for api in _get_all_apis(hass):
+            try:
+                await api.reject(call.data[ATTR_MAC], call.data.get(ATTR_COMMENT, ""))
+            except Exception as err:  # noqa: BLE001
+                errors.append(str(err))
+
+        if errors and len(errors) == len(_get_all_apis(hass)):
+            raise ApiError("; ".join(errors))
 
     async def handle_disconnect(call: ServiceCall) -> None:
-        api = _get_first_api(hass)
-        await api.disconnect(call.data[ATTR_MAC])
+        # Doar routerul pe care device-ul chiar e conectat acum are o
+        # intrare activă în registration-table - încercăm pe rând.
+        last_error: Exception | None = None
+        for api in _get_all_apis(hass):
+            try:
+                await api.disconnect(call.data[ATTR_MAC])
+                return
+            except ApiError as err:
+                last_error = err
+                continue
+
+        if last_error is not None:
+            raise last_error
 
     async def handle_make_static(call: ServiceCall) -> None:
-        api = _get_first_api(hass)
-        lease = await api.find_lease_by_mac(call.data[ATTR_MAC])
+        for api in _get_all_apis(hass):
+            lease = await api.find_lease_by_mac(call.data[ATTR_MAC])
+            if lease is not None:
+                await api.make_static(lease[".id"])
+                return
 
-        if lease is None:
-            raise ApiError(f"No DHCP lease found for {call.data[ATTR_MAC]}")
-
-        await api.make_static(lease[".id"])
+        raise ApiError(f"No DHCP lease found for {call.data[ATTR_MAC]}")
 
     async def handle_approve_all_current(call: ServiceCall) -> None:
-        api = _get_first_api(hass)
-        await api.approve_all_current()
+        for api in _get_all_apis(hass):
+            await api.approve_all_current()
 
     async def handle_enable_strict_mode(call: ServiceCall) -> None:
-        api = _get_first_api(hass)
-        await api.enable_strict_mode()
+        for api in _get_all_apis(hass):
+            await api.enable_strict_mode()
 
     hass.services.async_register(
         DOMAIN, SERVICE_APPROVE, handle_approve, schema=SERVICE_MAC_SCHEMA
