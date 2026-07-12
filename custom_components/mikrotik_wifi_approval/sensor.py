@@ -12,6 +12,24 @@ from .const import ATTR_INTERFACE, ATTR_MAC, ATTR_NAME, DOMAIN
 from .coordinator import MikrotikWifiCoordinator
 
 
+def _is_randomized_mac(mac: str) -> bool:
+    """Return True if the MAC has the 'locally administered' bit set.
+
+    This is the standard signature of a privacy/random WiFi MAC (iOS,
+    modern Android). Note plenty of *wired* virtual NICs (Docker,
+    Proxmox) also use locally-administered addresses on purpose, so
+    this check alone isn't enough to hide a device - it's only used
+    together with "no known name" below.
+    """
+
+    try:
+        first_octet = int(mac.split(":")[0], 16)
+    except (ValueError, IndexError):
+        return False
+
+    return bool(first_octet & 0x02)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -171,11 +189,19 @@ class ConnectedClientsSensor(CoordinatorEntity[MikrotikWifiCoordinator], SensorE
             access = access_by_mac.get(mac_lower, {})
             lease = lease_by_mac.get(mac_lower, {})
 
+            known_name = access.get("comment") or lease.get("host-name")
+
+            if _is_randomized_mac(arp_entry.get("mac-address", "")) and not known_name:
+                # Foarte probabil un telefon/tabletă cu MAC privat, ieșit
+                # temporar din registration-table (roaming/idle) - nu are
+                # niciun identificator persistent, deci nu-l mai afișăm
+                # ca "LAN" fals; la reconectare pe WiFi revine normal.
+                continue
+
             rows.append(
                 {
                     ATTR_NAME: (
-                        access.get("comment")
-                        or lease.get("host-name")
+                        known_name
                         or arp_entry.get("mac-address")
                     ),
                     ATTR_MAC: arp_entry.get("mac-address"),
