@@ -373,6 +373,9 @@ class MikrotikApiClient:
             decided_macs.add(mac.lower())
             added += 1
 
+        if added:
+            await self.bump_catchall()
+
         return added
 
     # --------------------------------------------------------
