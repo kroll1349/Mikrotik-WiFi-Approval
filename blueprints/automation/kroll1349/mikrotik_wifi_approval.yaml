@@ -80,7 +80,9 @@ action:
         sequence:
           - variables:
               mac: "{{ trigger.event.data.mac }}"
-              device_name: "{{ known_devices_map.get(mac, 'Dispozitiv necunoscut') }}"
+              vendor: "{{ trigger.event.data.vendor }}"
+              device_name: >-
+                {{ known_devices_map.get(mac, vendor if vendor else 'Dispozitiv necunoscut') }}
           - repeat:
               for_each: "{{ notify_devices }}"
               sequence:
@@ -89,7 +91,8 @@ action:
                     title: "{{ notify_title }}: {{ device_name }}"
                     message: >
                       MAC: {{ mac }}
-                      {% if trigger.event.data.interface %}Interfață: {{ trigger.event.data.interface }}
+                      {% if vendor %}Producător: {{ vendor }}
+                      {% endif %}{% if trigger.event.data.interface %}Interfață: {{ trigger.event.data.interface }}
                       {% endif %}{% if trigger.event.data.comment %}Info: {{ trigger.event.data.comment }}{% endif %}
                     data:
                       sticky: "true"
