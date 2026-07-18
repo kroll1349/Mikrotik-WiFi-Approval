@@ -7,9 +7,27 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import ATTR_INTERFACE, ATTR_MAC, ATTR_NAME, DOMAIN
 from .coordinator import MikrotikWifiCoordinator
+
+
+def _format_uptime(seconds: float) -> str:
+    """Format a duration in seconds as a short MikroTik-style string."""
+
+    seconds = int(seconds)
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+
+    if days:
+        return f"{days}d{hours}h{minutes}m"
+    if hours:
+        return f"{hours}h{minutes}m"
+    if minutes:
+        return f"{minutes}m{seconds}s"
+    return f"{seconds}s"
 
 
 def _is_randomized_mac(mac: str) -> bool:
@@ -128,6 +146,8 @@ class ConnectedClientsSensor(CoordinatorEntity[MikrotikWifiCoordinator], SensorE
         access_list = data.get("access_list", [])
         leases = data.get("leases", [])
         arp = data.get("arp", [])
+        bridge_hosts = data.get("bridge_hosts", [])
+        lan_first_seen = data.get("lan_first_seen", {})
 
         access_by_mac = {
             e.get("mac-address", "").lower(): e
@@ -143,6 +163,15 @@ class ConnectedClientsSensor(CoordinatorEntity[MikrotikWifiCoordinator], SensorE
             e.get("mac-address", "").lower(): e
             for e in arp
             if e.get("mac-address")
+        }
+        # Only keep the physical-port entries (ether1, ether3, ...) -
+        # the bridge host table also lists the bridge's own virtual
+        # interfaces, which aren't useful here.
+        port_by_mac = {
+            e.get("mac-address", "").lower(): e.get("on-interface")
+            for e in bridge_hosts
+            if e.get("mac-address")
+            and (e.get("on-interface") or "").lower().startswith("ether")
         }
 
         rows: list[dict] = []
@@ -198,6 +227,19 @@ class ConnectedClientsSensor(CoordinatorEntity[MikrotikWifiCoordinator], SensorE
                 # ca "LAN" fals; la reconectare pe WiFi revine normal.
                 continue
 
+            port = port_by_mac.get(mac_lower)
+            first_seen = lan_first_seen.get(mac_lower)
+            uptime = None
+
+            if first_seen:
+                try:
+                    elapsed = (
+                        dt_util.utcnow() - dt_util.parse_datetime(first_seen)
+                    ).total_seconds()
+                    uptime = _format_uptime(elapsed)
+                except (TypeError, ValueError):
+                    uptime = None
+
             rows.append(
                 {
                     ATTR_NAME: (
@@ -205,9 +247,9 @@ class ConnectedClientsSensor(CoordinatorEntity[MikrotikWifiCoordinator], SensorE
                         or arp_entry.get("mac-address")
                     ),
                     ATTR_MAC: arp_entry.get("mac-address"),
-                    ATTR_INTERFACE: arp_entry.get("interface"),
+                    ATTR_INTERFACE: port or arp_entry.get("interface"),
                     "ip": arp_entry.get("address") or lease.get("address"),
-                    "uptime": None,
+                    "uptime": uptime,
                     "signal": None,
                     "connection": "lan",
                     "approved": None,

@@ -235,6 +235,20 @@ class MikrotikApiClient:
             "/ip/arp",
         )
 
+    async def get_bridge_hosts(self) -> list[dict[str, Any]]:
+        """Return the bridge host table.
+
+        This is the only place RouterOS exposes which *physical* port
+        (e.g. ether3) a given MAC is actually plugged into - the ARP
+        table only shows the bridge interface (e.g. bridge1) itself,
+        since ARP operates at L3 on the bridge, not on individual ports.
+        """
+
+        return await self._request(
+            "GET",
+            "/interface/bridge/host",
+        )
+
     async def disconnect(
         self,
         mac: str,

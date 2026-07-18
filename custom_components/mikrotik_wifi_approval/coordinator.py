@@ -9,6 +9,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .api import MikrotikApiClient
 from .const import (
@@ -72,6 +73,14 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # already processed, so we don't reprocess old log lines.
         self._last_log_id: int = -1
 
+        # RouterOS doesn't track "how long has this wired client been
+        # connected" anywhere - the bridge host table only shows current
+        # presence, not history. We approximate it ourselves: the first
+        # time we see a MAC on a physical ether port, we remember the
+        # timestamp; if it later disappears (unplugged) and comes back,
+        # the timer restarts.
+        self._lan_first_seen: dict[str, Any] = {}
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch registration table, access list, and new log entries."""
 
@@ -94,6 +103,35 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("Failed to fetch ARP table: %s", err)
             arp_table = []
+
+        try:
+            bridge_hosts = await self.api.get_bridge_hosts()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Failed to fetch bridge host table: %s", err)
+            bridge_hosts = []
+
+        # Track "connected since" for wired clients: remember the first
+        # time each MAC is seen on a physical ether port, and forget it
+        # again once it's no longer there (so unplug/replug restarts
+        # the timer, matching what "connected since" should mean).
+        now = dt_util.utcnow()
+        currently_wired: set[str] = set()
+
+        for host in bridge_hosts:
+            mac_lower = host.get("mac-address", "").lower()
+            on_interface = host.get("on-interface", "")
+
+            if not mac_lower or not on_interface.lower().startswith("ether"):
+                continue
+
+            currently_wired.add(mac_lower)
+
+            if mac_lower not in self._lan_first_seen:
+                self._lan_first_seen[mac_lower] = now
+
+        for mac_lower in list(self._lan_first_seen):
+            if mac_lower not in currently_wired:
+                del self._lan_first_seen[mac_lower]
 
         decided_macs = {
             entry.get("mac-address", "").lower()
@@ -228,6 +266,10 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "strict_mode": strict_mode,
             "leases": leases,
             "arp": arp_table,
+            "bridge_hosts": bridge_hosts,
+            "lan_first_seen": {
+                mac: ts.isoformat() for mac, ts in self._lan_first_seen.items()
+            },
         }
 
     def _notify_pending(
