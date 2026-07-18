@@ -12,6 +12,7 @@ from .exceptions import (
     CannotConnect,
     InvalidAuth,
 )
+from .oui import lookup_vendor as _lookup_vendor
 
 
 class MikrotikApiClient:
@@ -248,6 +249,15 @@ class MikrotikApiClient:
             "GET",
             "/interface/bridge/host",
         )
+
+    async def lookup_vendor(self, mac: str) -> str | None:
+        """Best-effort manufacturer lookup for a MAC address.
+
+        Not a RouterOS call - queries the free api.macvendors.com
+        service and caches results. Returns None on any failure.
+        """
+
+        return await _lookup_vendor(self._session, mac)
 
     async def disconnect(
         self,

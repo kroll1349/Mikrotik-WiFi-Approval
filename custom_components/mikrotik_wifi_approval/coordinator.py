@@ -18,6 +18,7 @@ from .const import (
     ATTR_IP,
     ATTR_MAC,
     ATTR_NAME,
+    ATTR_VENDOR,
     CATCHALL_COMMENT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -171,7 +172,7 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if mac_lower in decided_macs:
                     continue
 
-                self._notify_pending(
+                await self._notify_pending(
                     pending,
                     mac=mac,
                     interface=entry.get("interface"),
@@ -211,7 +212,7 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if mac_lower in decided_macs or mac_lower in self._baseline:
                     continue
 
-                self._notify_pending(
+                await self._notify_pending(
                     pending,
                     mac=mac,
                     interface=entry.get("interface"),
@@ -250,7 +251,7 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 seen_in_log.add(mac_lower)
 
-                self._notify_pending(
+                await self._notify_pending(
                     pending, mac=mac, interface=None, ip=None, comment=""
                 )
 
@@ -272,7 +273,7 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             },
         }
 
-    def _notify_pending(
+    async def _notify_pending(
         self,
         pending: list[dict[str, Any]],
         *,
@@ -284,12 +285,14 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Add a device to the pending list and fire the event once."""
 
         mac_lower = mac.lower()
+        vendor = await self.api.lookup_vendor(mac)
 
         pending.append(
             {
                 ATTR_MAC: mac,
                 ATTR_INTERFACE: interface,
                 ATTR_NAME: comment or interface or mac,
+                ATTR_VENDOR: vendor,
             }
         )
 
@@ -305,5 +308,6 @@ class MikrotikWifiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ATTR_INTERFACE: interface,
                 ATTR_IP: ip,
                 ATTR_COMMENT: comment,
+                ATTR_VENDOR: vendor,
             },
         )

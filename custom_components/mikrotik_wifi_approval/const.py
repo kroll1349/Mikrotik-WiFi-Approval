@@ -21,6 +21,7 @@ ATTR_NAME = "name"
 ATTR_COMMENT = "comment"
 ATTR_IP = "ip"
 ATTR_INTERFACE = "interface"
+ATTR_VENDOR = "vendor"
 
 SERVICE_APPROVE = "approve"
 SERVICE_REJECT = "reject"

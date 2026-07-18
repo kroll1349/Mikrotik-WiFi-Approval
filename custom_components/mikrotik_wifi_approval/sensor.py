@@ -9,7 +9,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import ATTR_INTERFACE, ATTR_MAC, ATTR_NAME, DOMAIN
+from .const import ATTR_INTERFACE, ATTR_MAC, ATTR_NAME, ATTR_VENDOR, DOMAIN
 from .coordinator import MikrotikWifiCoordinator
 
 
@@ -103,7 +103,11 @@ class PendingDevicesSensor(CoordinatorEntity[MikrotikWifiCoordinator], SensorEnt
 
         return {
             "devices": [
-                {ATTR_MAC: d[ATTR_MAC], ATTR_NAME: d.get(ATTR_NAME)}
+                {
+                    ATTR_MAC: d[ATTR_MAC],
+                    ATTR_NAME: d.get(ATTR_NAME),
+                    ATTR_VENDOR: d.get(ATTR_VENDOR),
+                }
                 for d in pending
             ]
         }
